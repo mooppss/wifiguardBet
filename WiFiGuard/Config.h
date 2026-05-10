@@ -84,7 +84,7 @@
 #define FEATURE_EXPERT_MODE  1
 #define FEATURE_DIAG_SERIAL  1
 #define DEBUG_SERIAL         0
-// Optional: install "QRCode" by ricmoo (Arduino Library Manager), then uncomment to show portal URL as QR
-// #define USE_QRCODE_LIB  1
+// QR rendering now uses the ESP32 built-in esp_qrcode library — no external install needed.
+// #define USE_QRCODE_LIB  1  (retired; kept for reference only)
 
 #endif
