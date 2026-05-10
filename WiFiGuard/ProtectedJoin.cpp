@@ -90,8 +90,9 @@ void ProtectedJoin::cancel() {
   Serial.println("[PJ] cancel() — restoring STA mode.");
   stopWebServer_();
   stopSoftAp_();
+  WiFi.mode(WIFI_OFF);
+  delay(100);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true);
   clearSensitive_();
   active_ = false;
   status_.phase = PJ_IDLE;
@@ -162,34 +163,48 @@ void ProtectedJoin::startSoftAp_() {
   Serial.print("[PJ] AP Pass: "); Serial.println(apPass_);
   Serial.print("[PJ] Pairing code: "); Serial.println(pairingCode_);
 
-  // Cleanly tear down any prior STA state before switching modes.
-  // Without this, residual STA state can prevent softAP from initialising.
-  WiFi.disconnect(true);
-  delay(100);
+  // Prevent the ESP32 from writing/restoring STA credentials from flash and from
+  // silently trying to reconnect in the background. Both would compete with the AP.
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
+
+  // WIFI_OFF is the only way to fully stop the esp-idf WiFi stack and clear all
+  // internal driver state. WiFi.disconnect(true) is not equivalent — it only
+  // disconnects the STA but leaves the radio running, and residual STA state
+  // can prevent softAP from initialising cleanly on the next mode switch.
+  WiFi.mode(WIFI_OFF);
+  delay(200);
 
   // Use pure AP mode (not AP_STA) while waiting for the phone.
   // On a single-radio ESP32, AP_STA forces channel-sharing between AP and STA;
   // that causes the AP beacon to drop whenever the radio hops channels for STA
   // background activity — making the SSID invisible to phones intermittently.
-  // We switch to AP_STA only when we actually need to connect as a station.
   WiFi.mode(WIFI_AP);
-  delay(50);
+  delay(100);
 
-  // Channel 1 is the most universally supported channel. Explicit value avoids
-  // the radio reusing whatever channel was left over from the last scan.
-  // max_connection=4 (default), hidden=false (must broadcast SSID).
-  bool ok = WiFi.softAP(apSsid_, apPass_, /*channel=*/1, /*hidden=*/0, /*max_conn=*/4);
+  // Explicit static IP config initialises the AP's DHCP server before softAP().
+  // Without this, the DHCP server can start in a bad state: phones associate at
+  // the radio layer but never receive an IP, so the network appears non-existent.
+  WiFi.softAPConfig(
+    IPAddress(192, 168, 4, 1),   // AP IP
+    IPAddress(192, 168, 4, 1),   // gateway
+    IPAddress(255, 255, 255, 0)  // subnet
+  );
 
-  // The beacon takes up to ~300ms to start transmitting reliably. 50ms is not
-  // enough — phones that probe during this window will miss the network entirely.
-  delay(300);
+  // Channel 6 is one of the three non-overlapping 2.4 GHz channels (1, 6, 11).
+  // Explicit value prevents the radio from reusing whatever channel was active
+  // during the last scan. max_conn=4, hidden=0 (SSID must be broadcast).
+  bool ok = WiFi.softAP(apSsid_, apPass_, /*channel=*/6, /*hidden=*/0, /*max_conn=*/4);
+
+  // Allow the beacon to start transmitting before we hand IP address to DNS.
+  delay(500);
 
   if (!ok) {
     Serial.println("[PJ] ERROR: WiFi.softAP() failed — AP will not be visible!");
   } else {
     IPAddress apIP = WiFi.softAPIP();
-    Serial.print("[PJ] AP started OK. IP: "); Serial.println(apIP);
-    Serial.print("[PJ] Station count: "); Serial.println(WiFi.softAPgetStationNum());
+    Serial.print("[PJ] AP started OK on ch6. IP: "); Serial.println(apIP);
+    Serial.print("[PJ] AP MAC: "); Serial.println(WiFi.softAPmacAddress());
   }
 
   // Captive DNS: redirect all DNS queries to our IP so browsers auto-open the portal.
@@ -262,8 +277,11 @@ void ProtectedJoin::beginConnect_() {
   status_.httpOk = false;
   Serial.print("[PJ] Connecting to: "); Serial.println(status_.targetSsid);
   // AP is already stopped by this point (stopSoftAp_() called in /submit handler).
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(false);
+  WiFi.mode(WIFI_OFF);
+  delay(100);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true);
   delay(100);
   if (status_.targetSsid[0] && hasPassword_)
     WiFi.begin(status_.targetSsid, password_);
