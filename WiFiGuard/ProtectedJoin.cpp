@@ -65,6 +65,7 @@ void ProtectedJoin::clearSensitive_() {
 }
 
 void ProtectedJoin::start(const char* targetSsid) {
+  Serial.print("[PJ] start() for SSID: "); Serial.println(targetSsid ? targetSsid : "(null)");
   cancel();
   active_ = true;
   failureCount_ = 0;
@@ -86,6 +87,7 @@ void ProtectedJoin::start(const char* targetSsid) {
 }
 
 void ProtectedJoin::cancel() {
+  Serial.println("[PJ] cancel() — restoring STA mode.");
   stopWebServer_();
   stopSoftAp_();
   WiFi.mode(WIFI_STA);
@@ -155,23 +157,58 @@ void ProtectedJoin::startSoftAp_() {
   snprintf(pairingCode_, sizeof(pairingCode_), "%02u%02u",
            (unsigned)(rand32_() % 100), (unsigned)(rand32_() % 100));
 
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(apSsid_, apPass_);
+  Serial.println("[PJ] Starting setup AP...");
+  Serial.print("[PJ] AP SSID: "); Serial.println(apSsid_);
+  Serial.print("[PJ] AP Pass: "); Serial.println(apPass_);
+  Serial.print("[PJ] Pairing code: "); Serial.println(pairingCode_);
+
+  // Cleanly tear down any prior STA state before switching modes.
+  // Without this, residual STA state can prevent softAP from initialising.
+  WiFi.disconnect(true);
+  delay(100);
+
+  // Use pure AP mode (not AP_STA) while waiting for the phone.
+  // On a single-radio ESP32, AP_STA forces channel-sharing between AP and STA;
+  // that causes the AP beacon to drop whenever the radio hops channels for STA
+  // background activity — making the SSID invisible to phones intermittently.
+  // We switch to AP_STA only when we actually need to connect as a station.
+  WiFi.mode(WIFI_AP);
   delay(50);
 
-  // Optional captive DNS to make http://wifiguard/ style work; points everything to AP IP.
+  // Channel 1 is the most universally supported channel. Explicit value avoids
+  // the radio reusing whatever channel was left over from the last scan.
+  // max_connection=4 (default), hidden=false (must broadcast SSID).
+  bool ok = WiFi.softAP(apSsid_, apPass_, /*channel=*/1, /*hidden=*/0, /*max_conn=*/4);
+
+  // The beacon takes up to ~300ms to start transmitting reliably. 50ms is not
+  // enough — phones that probe during this window will miss the network entirely.
+  delay(300);
+
+  if (!ok) {
+    Serial.println("[PJ] ERROR: WiFi.softAP() failed — AP will not be visible!");
+  } else {
+    IPAddress apIP = WiFi.softAPIP();
+    Serial.print("[PJ] AP started OK. IP: "); Serial.println(apIP);
+    Serial.print("[PJ] Station count: "); Serial.println(WiFi.softAPgetStationNum());
+  }
+
+  // Captive DNS: redirect all DNS queries to our IP so browsers auto-open the portal.
   IPAddress apIP = WiFi.softAPIP();
   g_dns.start(53, "*", apIP);
+  Serial.print("[PJ] DNS captive portal running on "); Serial.println(apIP);
 }
 
 void ProtectedJoin::stopSoftAp_() {
+  Serial.println("[PJ] Stopping AP and DNS.");
   g_dns.stop();
   WiFi.softAPdisconnect(true);
+  delay(50);
 }
 
 void ProtectedJoin::startWebServer_() {
   g_server.stop();
   g_server.on("/", HTTP_GET, [this]() {
+    Serial.println("[PJ] Phone loaded setup page (GET /).");
     static char html[1100];
     buildHtml_(html, sizeof(html));
     g_server.send(200, "text/html", html);
@@ -182,7 +219,9 @@ void ProtectedJoin::startWebServer_() {
     const char* ssid = g_server.arg("ssid").c_str();
     const char* pw = g_server.arg("pw").c_str();
 
+    Serial.println("[PJ] /submit received from phone.");
     if (!validatePairing_(code)) {
+      Serial.println("[PJ] /submit: pairing code mismatch.");
       g_server.send(403, "text/plain", "Pairing code incorrect.");
       return;
     }
@@ -221,9 +260,11 @@ void ProtectedJoin::beginConnect_() {
   status_.dhcpOk = false;
   status_.dnsOk = false;
   status_.httpOk = false;
+  Serial.print("[PJ] Connecting to: "); Serial.println(status_.targetSsid);
+  // AP is already stopped by this point (stopSoftAp_() called in /submit handler).
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
-  delay(50);
+  delay(100);
   if (status_.targetSsid[0] && hasPassword_)
     WiFi.begin(status_.targetSsid, password_);
 }

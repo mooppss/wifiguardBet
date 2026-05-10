@@ -29,6 +29,13 @@ AuthType WiFiScanner::mapAuth(int wifiAuth) {
 }
 
 void WiFiScanner::startScan() {
+  // Guard: never overwrite AP mode. If the radio is hosting a softAP, calling
+  // WiFi.mode(WIFI_STA) here would instantly kill it and disconnect any phones.
+  wifi_mode_t current = WiFi.getMode();
+  if (current == WIFI_AP || current == WIFI_AP_STA) {
+    Serial.println("[Scanner] WARN: scan blocked — AP mode active.");
+    return;
+  }
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(200);
