@@ -22,6 +22,7 @@ public:
   void setSettingsOptionIndex(int i) { settingsOptionIndex_ = i; dirty_ = true; }
   void setHighRiskAlert(bool v) { highRiskAlert_ = v; dirty_ = true; }
   bool hasHighRiskAlert() const { return highRiskAlert_; }
+  void setPjShowQR(bool v) { pjShowQR_ = v; dirty_ = true; }
   void setToast(const char* msg);
   void clearToast();
   void cycleEnvPage() { envPage_ = (envPage_ + 1) % 2; dirty_ = true; }
@@ -59,6 +60,7 @@ private:
   const char* portalStr(PortalResult p) const;
 
   bool    dirty_;
+  bool    pjShowQR_;
   UIView  view_;
   int     listIndex_;
   int     listScroll_;

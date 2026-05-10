@@ -139,14 +139,23 @@ void loop() {
     if (stateMachine.getState() == STATE_PROTECTED_JOIN) {
       // Two-button controls during join flow:
       // - R cancels and clears credentials
-      // - L retries (from results) by restarting setup hotspot
+      // - L (waiting phase): toggle QR / text view
+      // - L (results phase): retry  |  Hold L (results): save trusted profile
       if (evt.type == EVT_TAP_B2 || evt.type == EVT_LONG_B2) {
         protectedJoin.cancel();
+        ui.setPjShowQR(false);
         stateMachine.setState(STATE_BROWSING);
         ui.setView(VIEW_LIST);
         ui.setToast("Cancelled");
         ui.setDirty();
+      } else if (evt.type == EVT_TAP_B1 &&
+                 protectedJoin.getStatus().phase == PJ_WAITING_FOR_PHONE) {
+        // Toggle between QR code view and text credential view
+        static bool qrOn = false;
+        qrOn = !qrOn;
+        ui.setPjShowQR(qrOn);
       } else if (evt.type == EVT_TAP_B1 && protectedJoin.isInResults()) {
+        ui.setPjShowQR(false);
         protectedJoin.retry();
         ui.setDirty();
       } else if (evt.type == EVT_LONG_B1 && protectedJoin.isInResults()) {
@@ -193,6 +202,7 @@ void loop() {
               if (powerManager.isCriticalBattery()) {
                 ui.setToast("Critical battery - charge first");
               } else {
+                ui.setPjShowQR(false);
                 protectedJoin.start(n->ssid);
                 stateMachine.setState(STATE_PROTECTED_JOIN);
                 ui.setDirty();

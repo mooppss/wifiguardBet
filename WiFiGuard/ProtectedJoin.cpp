@@ -230,11 +230,19 @@ void ProtectedJoin::startWebServer_() {
   });
 
   g_server.on("/submit", HTTP_POST, [this]() {
-    const char* code = g_server.arg("code").c_str();
-    const char* ssid = g_server.arg("ssid").c_str();
-    const char* pw = g_server.arg("pw").c_str();
+    // g_server.arg() returns a temporary String. We MUST store them in named
+    // variables before calling .c_str() — taking c_str() of a temporary gives
+    // a dangling pointer the moment the temporary is destroyed at the semicolon.
+    String codeStr = g_server.arg("code");
+    String ssidStr = g_server.arg("ssid");
+    String pwStr   = g_server.arg("pw");
+    codeStr.trim();  // phones/keyboards sometimes append whitespace
+    const char* code = codeStr.c_str();
+    const char* ssid = ssidStr.c_str();
+    const char* pw   = pwStr.c_str();
 
-    Serial.println("[PJ] /submit received from phone.");
+    Serial.print("[PJ] /submit received. code='"); Serial.print(code);
+    Serial.print("' expected='"); Serial.print(pairingCode_); Serial.println("'");
     if (!validatePairing_(code)) {
       Serial.println("[PJ] /submit: pairing code mismatch.");
       g_server.send(403, "text/plain", "Pairing code incorrect.");

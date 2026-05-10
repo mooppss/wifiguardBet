@@ -296,6 +296,7 @@ void UI::begin() {
   lastRedraw_ = 0;
   settingsOptionIndex_ = 0;
   highRiskAlert_ = false;
+  pjShowQR_ = false;
   toast_[0] = '\0';
   toastUntil_ = 0;
   envPage_ = 0;
@@ -626,24 +627,51 @@ void UI::drawProtectedJoin() {
   displayDriver.fillRect(0, CONTENT_Y, SCREEN_W, CONTENT_H, COL_BG);
 
   if (st.phase == PJ_WAITING_FOR_PHONE) {
-    drawHeader("Secure Join");
-    int y = CONTENT_Y + 6;
-    drawClippedText(MARGIN_L, y, "Enter password on your phone", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_FG, COL_BG);
-    y += 12;
-    drawClippedText(MARGIN_L, y, "Only for networks you are allowed", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_DIM, COL_BG);
-    y += 14;
-    char buf[64];
-    snprintf(buf, sizeof(buf), "1) Join: %s", protectedJoin.getSetupApSsid());
-    drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_INFO, COL_BG);
-    y += 11;
-    snprintf(buf, sizeof(buf), "2) Pass: %s", protectedJoin.getSetupApPass());
-    drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_INFO, COL_BG);
-    y += 11;
-    drawClippedText(MARGIN_L, y, "3) Open: http://192.168.4.1", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_DIM, COL_BG);
-    y += 11;
-    snprintf(buf, sizeof(buf), "Pairing code: %s", protectedJoin.getPairingCode());
-    drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_WARN, COL_BG);
-    drawFooter("R=Cancel");
+    if (pjShowQR_) {
+      // ── QR view: scan with phone camera to auto-join the setup AP ───────────
+      // Payload follows the WIFI: URI scheme understood natively by iOS 11+ and
+      // Android 10+ camera apps — no third-party scanner needed.
+      drawHeader("Scan QR to connect");
+      char qrBuf[96];
+      snprintf(qrBuf, sizeof(qrBuf), "WIFI:T:WPA;S:%s;P:%s;;",
+               protectedJoin.getSetupApSsid(), protectedJoin.getSetupApPass());
+      int modulePx = 2;
+      int qrPx = 37 * modulePx;  // version 5 = 37 modules
+      int qx = (SCREEN_W - qrPx) / 2;
+      int qy = CONTENT_Y + 2;
+      drawQRCode(qx, qy, modulePx, qrBuf);
+      // Show pairing code below so the user doesn't lose it while on QR view
+      char codeBuf[24];
+      snprintf(codeBuf, sizeof(codeBuf), "Code: %s", protectedJoin.getPairingCode());
+      displayDriver.setTextSize(1);
+      displayDriver.setTextColor(COL_WARN, COL_BG);
+      int textY = qy + qrPx + 4;
+      if (textY < FTR_Y - 10) {
+        displayDriver.setCursor((SCREEN_W - (int)strlen(codeBuf) * PIX_CHAR_1) / 2, textY);
+        displayDriver.print(codeBuf);
+      }
+      drawFooter("L=Text view  R=Cancel");
+    } else {
+      // ── Text view ────────────────────────────────────────────────────────────
+      drawHeader("Secure Join");
+      int y = CONTENT_Y + 6;
+      drawClippedText(MARGIN_L, y, "Enter password on your phone", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_FG, COL_BG);
+      y += 12;
+      drawClippedText(MARGIN_L, y, "Only for networks you are allowed", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_DIM, COL_BG);
+      y += 14;
+      char buf[64];
+      snprintf(buf, sizeof(buf), "1) Join: %s", protectedJoin.getSetupApSsid());
+      drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_INFO, COL_BG);
+      y += 11;
+      snprintf(buf, sizeof(buf), "2) Pass: %s", protectedJoin.getSetupApPass());
+      drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_INFO, COL_BG);
+      y += 11;
+      drawClippedText(MARGIN_L, y, "3) Open: http://192.168.4.1", SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_DIM, COL_BG);
+      y += 11;
+      snprintf(buf, sizeof(buf), "Pairing code: %s", protectedJoin.getPairingCode());
+      drawClippedText(MARGIN_L, y, buf, SCREEN_W - MARGIN_L - MARGIN_R, 1, COL_WARN, COL_BG);
+      drawFooter("L=QR code  R=Cancel");
+    }
     return;
   }
 
