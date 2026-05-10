@@ -12,8 +12,8 @@
 #include "ProtectedJoin.h"
 #include <string.h>
 #include <stdio.h>
-#if defined(ESP32)
-#include "esp_qrcode.h"
+#if defined(USE_QRCODE_LIB)
+#include <qrcode.h>   // "QRCode" by ricmoo — install via Arduino Library Manager
 #endif
 
 UI ui;
@@ -439,47 +439,44 @@ void UI::drawQRScreen() {
   drawFooter("R=Back");
 }
 
-// ─── QR code render — uses ESP32 built-in esp_qrcode (no extra library needed) ─────────────────────
-#if defined(ESP32)
-// File-scope context lets the static callback know where to draw.
-static struct { int x; int y; int px; } s_qrCtx;
-
-static void s_qrDrawCb(esp_qrcode_handle_t handle) {
-  uint8_t sz = esp_qrcode_get_size(handle);
-  // White quiet zone + background: QR spec requires 4-module border; 2px padding is enough for phones.
-  int pad = s_qrCtx.px * 2;
-  displayDriver.fillRect(s_qrCtx.x - pad, s_qrCtx.y - pad,
-                         sz * s_qrCtx.px + pad * 2, sz * s_qrCtx.px + pad * 2,
-                         0xFFFF);  // always white — QR must be black-on-white
-  for (uint8_t row = 0; row < sz; row++) {
-    for (uint8_t col = 0; col < sz; col++) {
-      if (esp_qrcode_get_module(handle, col, row)) {
-        displayDriver.fillRect(s_qrCtx.x + col * s_qrCtx.px,
-                               s_qrCtx.y + row * s_qrCtx.px,
-                               s_qrCtx.px, s_qrCtx.px,
-                               0x0000);  // always black
-      }
+// ─── QR code render ──────────────────────────────────────────────────────────────────────────────────
+// Requires "QRCode" by ricmoo from Arduino Library Manager + #define USE_QRCODE_LIB 1 in Config.h.
+// Without it the function shows a text placeholder — everything else still works normally.
+void UI::drawQRCode(int x, int y, int moduleSizePx, const char* url) {
+#if defined(USE_QRCODE_LIB)
+  QRCode qrcode;
+  // qrcode_getBufferSize() requires the version number — version 5 = 37x37 modules,
+  // handles up to 64 bytes (enough for WIFI: URIs and short portal URLs).
+  uint8_t qrcodeBytes[qrcode_getBufferSize(5)];
+  if (qrcode_initText(&qrcode, qrcodeBytes, 5, ECC_LOW, url) != 0) return;
+  // QR codes must be black-on-white; fill white background + quiet zone first.
+  int pad = moduleSizePx * 2;
+  displayDriver.fillRect(x - pad, y - pad,
+                         (int)qrcode.size * moduleSizePx + pad * 2,
+                         (int)qrcode.size * moduleSizePx + pad * 2,
+                         0xFFFF);
+  for (uint8_t dy = 0; dy < qrcode.size; dy++) {
+    for (uint8_t dx = 0; dx < qrcode.size; dx++) {
+      if (qrcode_getModule(&qrcode, dx, dy))
+        displayDriver.fillRect(x + (int)dx * moduleSizePx, y + (int)dy * moduleSizePx,
+                               moduleSizePx, moduleSizePx, 0x0000);
     }
   }
-}
-#endif
-
-void UI::drawQRCode(int x, int y, int moduleSizePx, const char* url) {
-#if defined(ESP32)
-  s_qrCtx.x  = x;
-  s_qrCtx.y  = y;
-  s_qrCtx.px = moduleSizePx;
-  esp_qrcode_config_t cfg;
-  cfg.display_qrcode    = s_qrDrawCb;
-  cfg.max_qrcode_version = 10;
-  cfg.ecc_level          = ESP_QRCODE_ECC_LOW;
-  esp_qrcode_generate(&cfg, url);
 #else
+  // No QR library — draw a placeholder box so the UI layout still makes sense.
   (void)url;
+  int boxW = 37 * moduleSizePx;
+  int boxH = boxW;
+  displayDriver.drawRect(x, y, boxW, boxH, COL_DIM);
+  displayDriver.drawRect(x + 1, y + 1, boxW - 2, boxH - 2, COL_DIM);
   displayDriver.setTextSize(1);
   displayDriver.setTextColor(COL_DIM, COL_BG);
-  displayDriver.setCursor(x, y + 20);
-  displayDriver.print("QR not supported");
+  displayDriver.setCursor(x + 4, y + boxH / 2 - 10);
+  displayDriver.print("Install QRCode");
+  displayDriver.setCursor(x + 4, y + boxH / 2);
+  displayDriver.print("lib by ricmoo");
+  displayDriver.setCursor(x + 4, y + boxH / 2 + 10);
+  displayDriver.print("(Library Mgr)");
 #endif
 }
 
